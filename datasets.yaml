@@ -1,0 +1,69 @@
+# 标准Glorys12 黑潮延伸体子区域数据集
+# 海洋与大气数据均经过min-max归一化处理到[0, 1]范围内
+glorys12_kuroshio_extension:
+  description: "GLORYS12 Kuroshio Extension Subregion Dataset"
+  base_dir: "/test1/dataset/DA/subregion/glorys12_kuroshio_extension/normalized_by_minmax"
+  raw_data_dir: "/test1/dataset/DA/subregion/glorys12_kuroshio_extension/normalized_by_minmax/data"
+  background_dir: "" # not ready
+  climatology_dir: "/test1/dataset/DA/subregion/glorys12_kuroshio_extension/normalized_by_minmax/climatology"
+  atm_forcing_dir: "/test1/dataset/DA/subregion/glorys12_kuroshio_extension/normalized_by_minmax/atm_forcing"
+  constant_dir: "/test1/dataset/DA/subregion/glorys12_kuroshio_extension/normalized_by_minmax/constant"
+  background_offset: 1
+  sample_num: 10227
+  num_channels: 101 # 25-level U V T S and 1-level SSH
+  num_forcing_channels: 9 # same as WenHai
+  grid_size: [250, 300]
+  train_val_test_split: [9131, 365, 731] # 1993-2017 for training, 2018 for validation, 2019-2020 for testing
+  train_date_range: ["1993-01-01", "2017-12-31"]
+  val_date_range: ["2018-01-01", "2018-12-31"]
+  test_date_range: ["2019-01-01", "2020-12-31"]
+  lat_range: [25.0, 45.75001]
+  lon_range: [150, 174.91668]
+
+
+# 经过Anomaly处理的Glorys12 黑潮延伸体子区域数据集
+# 海洋与大气数据先经过min-max归一化处理到[0, 1]范围
+# 随后海洋数据再减去对应的Climatology得到Anomaly数据
+glorys12_kuroshio_extension_anomaly:
+  description: "GLORYS12 Kuroshio Extension Subregion Anomaly Dataset"
+  base_dir: "/test1/dataset/DA/subregion/glorys12_kuroshio_extension/normalized_by_minmax_anomaly"
+  raw_data_dir: "/test1/dataset/DA/subregion/glorys12_kuroshio_extension/normalized_by_minmax_anomaly/data"
+  background_dir: "" # not ready
+  climatology_dir: "/test1/dataset/DA/subregion/glorys12_kuroshio_extension/normalized_by_minmax_anomaly/climatology"
+  atm_forcing_dir: "/test1/dataset/DA/subregion/glorys12_kuroshio_extension/normalized_by_minmax_anomaly/atm_forcing"
+  constant_dir: "/test1/dataset/DA/subregion/glorys12_kuroshio_extension/normalized_by_minmax_anomaly/constant"
+  background_offset: 1
+  sample_num: 10227
+  num_channels: 101 # 25-level U V T S and 1-level SSH
+  num_forcing_channels: 9 # same as WenHai
+  grid_size: [250, 300]
+  train_val_test_split: [9131, 365, 731] # 1993-2017 for training, 2018 for validation, 2019-2020 for testing
+  train_date_range: ["1993-01-01", "2017-12-31"]
+  val_date_range: ["2018-01-01", "2018-12-31"]
+  test_date_range: ["2019-01-01", "2020-12-31"]
+  lat_range: [25.0, 45.75001]
+  lon_range: [150, 174.91668]
+
+
+# 对U V T S SSH按变量归一化的Glorys12 黑潮延伸体子区域数据集
+# 大气数据经过min-max归一化处理到[0, 1]范围内
+# 海洋数据对每个变量依照全深度的最小值和最大值进行归一化处理到[0, 1]范围内，确保同样的数值在不同深度时具有相同的物理意义
+glorys12_kuroshio_extension_normalized_by_uvtsh:
+  description: "GLORYS12 Kuroshio Extension Subregion Dataset Normalized by UVTSH"
+  base_dir: "/test1/dataset/DA/subregion/glorys12_kuroshio_extension/normalized_by_uvtsh_minmax"
+  raw_data_dir: "/test1/dataset/DA/subregion/glorys12_kuroshio_extension/normalized_by_uvtsh_minmax/data"
+  background_dir: "" # not ready
+  climatology_dir: "" # not ready
+  atm_forcing_dir: "/test1/dataset/DA/subregion/glorys12_kuroshio_extension/normalized_by_uvtsh_minmax/atm_forcing"
+  constant_dir: "/test1/dataset/DA/subregion/glorys12_kuroshio_extension/normalized_by_uvtsh_minmax/constant"
+  background_offset: 1
+  sample_num: 10227
+  num_channels: 101 # 25-level U V T S and 1-level SSH
+  num_forcing_channels: 9 # same as WenHai
+  grid_size: [250, 300]
+  train_val_test_split: [9131, 365, 731] # 1993-2017 for training, 2018 for validation, 2019-2020 for testing
+  train_date_range: ["1993-01-01", "2017-12-31"]
+  val_date_range: ["2018-01-01", "2018-12-31"]
+  test_date_range: ["2019-01-01", "2020-12-31"]
+  lat_range: [25.0, 45.75001]
+  lon_range: [150, 174.91668]
