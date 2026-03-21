@@ -1,0 +1,5 @@
+Metadata-Version: 2.1
+Name: subregion-ae
+Version: 0.1.0
+Summary: Deep Convolutional AutoEncoder (DCAE) with sign-stabilized latent space for ocean data assimilation in the Kuroshio Extension region.
+Requires-Python: >=3.9
