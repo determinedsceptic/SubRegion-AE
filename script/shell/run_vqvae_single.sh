@@ -41,7 +41,7 @@ echo "TAG=$TAG"
 cd "$PROJECT_ROOT"
 
 CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES \
-torchrun $DISTRIBUTED_ARGS train_vqvae.py \
+torchrun $DISTRIBUTED_ARGS train/train_vqvae.py \
     --data-name "$DATA_NAME" \
     --batch-size "$BATCH_SIZE" \
     --epochs "$EPOCHS" \

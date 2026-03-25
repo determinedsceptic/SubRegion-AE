@@ -53,7 +53,7 @@ if [ -n "$SAVE_DIR" ]; then
 fi
 
 CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES \
-torchrun $DISTRIBUTED_ARGS train_dcae.py \
+torchrun $DISTRIBUTED_ARGS train/train_dcae.py \
     --data-name "$DATA_NAME" \
     --batch-size "$BATCH_SIZE" \
     --epochs "$EPOCHS" \

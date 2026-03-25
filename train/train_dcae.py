@@ -4,6 +4,7 @@ import argparse
 import json
 import random
 from datetime import datetime
+import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.distributed as dist
@@ -14,7 +15,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
+current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, current_dir)
 
 from model.dcae import DCAE
@@ -22,6 +23,7 @@ from data.dataset import build_dataset, load_constants
 from data.data_utils import normalize_fn
 from config import get_dataset_config
 from utils.checkpoint import save_checkpoint, auto_resume_helper
+from utils.flip_metrics import compute_flip_metrics
 
 
 def setup_distributed(args):
@@ -50,6 +52,17 @@ def cleanup_distributed(args):
     if args.distributed and dist.is_initialized():
         dist.barrier()
         dist.destroy_process_group()
+
+
+def set_seed(seed, rank=0):
+    """Set random seed for reproducibility across all libraries."""
+    seed = seed + rank
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
 
 
 def is_rank0(args):
@@ -131,6 +144,13 @@ def parse_args():
     parser.add_argument("--structured-weight", type=float, default=1.0,
                         help="Weight for DC-AE 1.5 structured latent space loss (0 disables)")
     parser.add_argument("--num-workers", type=int, default=4, help="DataLoader num_workers per rank")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    parser.add_argument("--flip-eval-interval", type=int, default=0,
+                        help="Evaluate flip metrics every N epochs (0=disabled)")
+    parser.add_argument("--flip-eval-sigma", type=float, default=16.0,
+                        help="Gaussian blur sigma for flip evaluation")
+    parser.add_argument("--flip-eval-batches", type=int, default=5,
+                        help="Number of val batches for flip evaluation")
     parser.add_argument("--auto-resume", action="store_true")
     parser.add_argument("--resume-path", type=str, default=None)
 
@@ -270,6 +290,7 @@ def try_resume(args, model_without_ddp, optimizer, scheduler):
 
 def train(args):
     setup_distributed(args)
+    set_seed(args.seed, rank=args.rank)
     if is_rank0(args):
         os.makedirs(args.save_dir, exist_ok=True)
 
@@ -512,6 +533,41 @@ def train(args):
                 f"Val loss/recon/fft={avg_val_loss:.6f}/{avg_val_recon:.6f}/{avg_val_fft:.6f}, "
                 f"LR={optimizer.param_groups[0]['lr']:.8f}",
             )
+
+            # ── Flip evaluation ──
+            if (args.flip_eval_interval > 0
+                    and (epoch + 1) % args.flip_eval_interval == 0
+                    and is_rank0(args)):
+                model.eval()
+                flip_xs, flip_recons = [], []
+                with torch.inference_mode(), autocast(enabled=torch.cuda.is_available()):
+                    for fi, batch in enumerate(val_loader):
+                        if fi >= args.flip_eval_batches:
+                            break
+                        x_flip = preprocess_raw_data(batch, normalization_stats, device)
+                        recon_flip = model(x_flip)
+                        flip_xs.append(x_flip.cpu())
+                        flip_recons.append(recon_flip.cpu())
+                        del x_flip, recon_flip
+                if flip_xs:
+                    flip_x_cat = torch.cat(flip_xs, dim=0)
+                    flip_r_cat = torch.cat(flip_recons, dim=0)
+                    mask_cpu = mask.cpu().float()
+                    _, flip_rate, _, _, _ = compute_flip_metrics(
+                        flip_x_cat, flip_r_cat, mask_cpu, args.flip_eval_sigma)
+                    # flip_rate: [B, C] -> per-channel mean over batch
+                    flip_rate_mean = flip_rate.mean(dim=0)  # [C]
+                    overall_flip = flip_rate_mean.mean().item()
+                    print_rank0(args, f"  Flip eval (σ={args.flip_eval_sigma}): "
+                                f"overall flip_rate={overall_flip:.4f}")
+                    if tb_writer is not None:
+                        tb_writer.add_scalar('flip/overall', overall_flip, epoch)
+                        for ch_idx in range(flip_rate_mean.shape[0]):
+                            tb_writer.add_scalar(f'flip/ch{ch_idx:03d}',
+                                                 flip_rate_mean[ch_idx].item(), epoch)
+                    del flip_x_cat, flip_r_cat, flip_xs, flip_recons
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
             if tb_writer is not None:
                 tb_writer.add_scalar('train/loss', avg_train_loss, epoch)

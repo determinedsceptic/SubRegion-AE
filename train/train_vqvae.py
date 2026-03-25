@@ -9,7 +9,7 @@ from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
+current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, current_dir)
 
 from model.vqvae import VQVAE
