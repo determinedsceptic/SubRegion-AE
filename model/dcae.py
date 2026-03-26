@@ -145,11 +145,10 @@ class DCAE(nn.Module):
             ))
         self.encoder_stages = nn.ModuleList(enc_stages)
 
-        # Bottleneck — Softplus forces z > 0, eliminating sign-flip ambiguity
+        # Bottleneck 
         self.encode_proj = nn.Sequential(
             RMSNorm(ch[-1]),
             nn.Conv2d(ch[-1], latent_channels, 1),
-            nn.Softplus(),
         )
         self.decode_proj = nn.Conv2d(latent_channels, ch[-1], 1)
 
