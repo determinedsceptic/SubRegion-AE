@@ -143,6 +143,8 @@ def parse_args():
 
     parser.add_argument("--structured-weight", type=float, default=1.0,
                         help="Weight for DC-AE 1.5 structured latent space loss (0 disables)")
+    parser.add_argument("--latent-noise-std", type=float, default=0.1,
+                        help="Gaussian noise std injected into latent z during training (0 disables)")
     parser.add_argument("--num-workers", type=int, default=4, help="DataLoader num_workers per rank")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--flip-eval-interval", type=int, default=0,
@@ -423,7 +425,8 @@ def train(args):
                 optimizer.zero_grad(set_to_none=True)
                 with autocast(enabled=torch.cuda.is_available()):
                     target_shape = (x.shape[2], x.shape[3])
-                    recon_x, z = model(x, return_latent=True)
+                    recon_x, z = model(x, return_latent=True,
+                                       latent_noise_std=args.latent_noise_std)
                     recon_loss = masked_recon_loss(recon_x, x, mask)
                     fft_loss = fft_spectral_loss(recon_x, x, mask)
                     latent_reg_loss = z.pow(2).mean()
@@ -433,7 +436,10 @@ def train(args):
                     c_prime = random.randint(1, args.latent_channels)
                     channel_mask = torch.zeros_like(z)
                     channel_mask[:, :c_prime] = 1.0
-                    recon_partial = model_without_ddp.decode(z * channel_mask, target_shape)
+                    z_for_struct = z
+                    if args.latent_noise_std > 0:
+                        z_for_struct = z + args.latent_noise_std * torch.randn_like(z)
+                    recon_partial = model_without_ddp.decode(z_for_struct * channel_mask, target_shape)
                     structured_loss = masked_recon_loss(recon_partial, x, mask)
 
                     total_loss = (recon_loss

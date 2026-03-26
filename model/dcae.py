@@ -145,11 +145,10 @@ class DCAE(nn.Module):
             ))
         self.encoder_stages = nn.ModuleList(enc_stages)
 
-        # Bottleneck — Softplus forces z > 0, eliminating sign-flip ambiguity
+        # Bottleneck 
         self.encode_proj = nn.Sequential(
             RMSNorm(ch[-1]),
             nn.Conv2d(ch[-1], latent_channels, 1),
-            nn.Softplus(),
         )
         self.decode_proj = nn.Conv2d(latent_channels, ch[-1], 1)
 
@@ -198,18 +197,24 @@ class DCAE(nn.Module):
         h = h[:, :, :target_shape[0], :target_shape[1]]
         return h
 
-    def forward(self, x: torch.Tensor, return_latent: bool = False):
+    def forward(self, x: torch.Tensor, return_latent: bool = False,
+                latent_noise_std: float = 0.0):
         target_shape = (x.shape[2], x.shape[3])
         x_padded, _, _ = self._pad(x)
         h = self.stem(x_padded)
         for stage in self.encoder_stages:
             h = stage(h)
         z = self.encode_proj(h)
-        h = self.decode_proj(z)
+        # Training noise injection: forces decoder to learn smooth mappings,
+        # eliminating sign-flip boundaries in latent space
+        z_decode = z
+        if self.training and latent_noise_std > 0:
+            z_decode = z + latent_noise_std * torch.randn_like(z)
+        h = self.decode_proj(z_decode)
         for stage in self.decoder_stages:
             h = stage(h)
         h = self.final(h)
         recon = h[:, :, :target_shape[0], :target_shape[1]]
         if return_latent:
-            return recon, z
+            return recon, z  # return clean z for latent_reg
         return recon
