@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check all modules import cleanly
+        run: |
+          python -c "from model.dcae import DCAE; print('dcae ok')"
+          python -c "from model.vqvae import VQVAE; print('vqvae ok')"
+          python -c "from data.dataset import build_dataset, load_constants; print('dataset ok')"
+          python -c "from data.data_utils import normalize_fn, denormalize_fn; print('data_utils ok')"
+          python -c "from config import get_dataset_config; print('config ok')"
+
+      - name: Smoke test DCAE forward pass
+        run: |
+          python -c "
+          import torch
+          from model.dcae import DCAE
+          model = DCAE(in_channels=5, base_channels=16, channel_multipliers=[1,2], latent_channels=4, attention_resolutions=[], num_res_blocks=1)
+          x = torch.randn(2, 5, 32, 32)
+          model.train()
+          out, mu, logvar, z = model(x, return_latent=True)
+          assert out.shape == x.shape, f'shape mismatch: {out.shape} vs {x.shape}'
+          model.eval()
+          out2 = model(x)
+          assert out2.shape == x.shape
+          print(f'DCAE forward ok: {x.shape} -> latent {z.shape} -> {out.shape}')
+          "
+
+      - name: Smoke test VQVAE forward pass
+        run: |
+          python -c "
+          import torch
+          from model.vqvae import VQVAE
+          model = VQVAE(in_channels=5, hidden_dims=[16,32], embedding_dim=8, num_embeddings=64)
+          x = torch.randn(2, 5, 32, 32)
+          out, q_info = model(x)
+          assert out.shape == x.shape, f'shape mismatch: {out.shape} vs {x.shape}'
+          print(f'VQVAE forward ok: {x.shape} -> {out.shape}, perplexity={q_info[\"perplexity\"]:.1f}')
+          "

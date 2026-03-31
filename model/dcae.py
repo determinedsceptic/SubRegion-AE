@@ -145,7 +145,7 @@ class DCAE(nn.Module):
             ))
         self.encoder_stages = nn.ModuleList(enc_stages)
 
-        # Bottleneck — Log-Normal VAE: h → μ, log_σ → z = exp(μ + σ·ε) > 0
+        # Bottleneck — VAE: h → μ, log_σ → z = μ + σ·ε
         self.encode_norm = RMSNorm(ch[-1])
         self.encode_mu = nn.Conv2d(ch[-1], latent_channels, 1)
         self.encode_logvar = nn.Conv2d(ch[-1], latent_channels, 1)
@@ -181,13 +181,13 @@ class DCAE(nn.Module):
         return x, H, W
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
-        """Encode x to latent exp(mu) (deterministic, for inference/DA)."""
+        """Encode x to latent mu (deterministic, for inference/DA)."""
         x, _, _ = self._pad(x)
         h = self.stem(x)
         for stage in self.encoder_stages:
             h = stage(h)
         h = self.encode_norm(h)
-        return torch.exp(self.encode_mu(h))
+        return self.encode_mu(h)
 
     def encode_distribution(self, x: torch.Tensor):
         """Encode x to (mu, logvar) for training with KL loss."""
@@ -216,11 +216,11 @@ class DCAE(nn.Module):
         h = self.encode_norm(h)
         mu = self.encode_mu(h)
         logvar = self.encode_logvar(h)
-        # Log-Normal reparameterization: z = exp(mu + sigma * epsilon) > 0 always
+        # Reparameterization: z = mu + sigma * epsilon
         if self.training:
-            z = torch.exp(mu + torch.exp(0.5 * logvar) * torch.randn_like(mu))
+            z = mu + torch.exp(0.5 * logvar) * torch.randn_like(mu)
         else:
-            z = torch.exp(mu)
+            z = mu
         h = self.decode_proj(z)
         for stage in self.decoder_stages:
             h = stage(h)
