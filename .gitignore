@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+*.pyo
+
+# Training outputs
+output/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data files
+*.pt
+*.pth
