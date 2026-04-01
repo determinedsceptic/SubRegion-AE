@@ -138,7 +138,8 @@ def parse_args():
     parser.add_argument("--attention-resolutions", nargs="+", type=int, default=[0, 1], help="Stage indices (0-based) where spatial attention is enabled")
     parser.add_argument("--num-heads", type=int, default=8, help="Number of attention heads in SpatialAttention")
     parser.add_argument("--fft-weight", type=float, default=0.5, help="Weight for FFT spectral loss term")
-    parser.add_argument("--latent-reg", type=float, default=1e-3, help="L2 regularization weight on latent z magnitude; prevents unbounded Softplus outputs (0 disables)")
+    parser.add_argument("--kl-weight", type=float, default=1e-4,
+                        help="Weight for KL divergence loss (beta-VAE); 0 disables VAE regularization")
     parser.add_argument("--grad-clip", type=float, default=1.0, help="Gradient clipping max norm; <=0 disables")
 
     parser.add_argument("--structured-weight", type=float, default=1.0,
@@ -423,13 +424,15 @@ def train(args):
                 optimizer.zero_grad(set_to_none=True)
                 with autocast(enabled=torch.cuda.is_available()):
                     target_shape = (x.shape[2], x.shape[3])
-                    recon_x, z = model(x, return_latent=True)
+                    recon_x, mu, logvar, z = model(x, return_latent=True)
                     recon_loss = masked_recon_loss(recon_x, x, mask)
                     fft_loss = fft_spectral_loss(recon_x, x, mask)
-                    latent_reg_loss = z.pow(2).mean()
+
+                    # KL divergence: KL(N(mu, sigma^2) || N(0, I))
+                    kl_loss = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).mean()
 
                     # DC-AE 1.5: Structured Latent Space loss
-                    # Randomly use only first c' channels to force channel ordering
+                    # Reuse z from forward pass (same reparameterization sample)
                     c_prime = random.randint(1, args.latent_channels)
                     channel_mask = torch.zeros_like(z)
                     channel_mask[:, :c_prime] = 1.0
@@ -438,7 +441,7 @@ def train(args):
 
                     total_loss = (recon_loss
                                   + args.fft_weight * fft_loss
-                                  + args.latent_reg * latent_reg_loss
+                                  + args.kl_weight * kl_loss
                                   + args.structured_weight * structured_loss)
 
                 scaler.scale(total_loss).backward()
@@ -463,7 +466,7 @@ def train(args):
                         'loss': total_loss.item(),
                         'recon': recon_loss.item(),
                         'fft': fft_loss.item(),
-                        'z_reg': latent_reg_loss.item(),
+                        'kl': kl_loss.item(),
                         'struct': structured_loss.item(),
                     })
 
@@ -471,13 +474,13 @@ def train(args):
                     tb_writer.add_scalar('train_step/loss', total_loss.item(), global_step)
                     tb_writer.add_scalar('train_step/recon', recon_loss.item(), global_step)
                     tb_writer.add_scalar('train_step/fft', fft_loss.item(), global_step)
-                    tb_writer.add_scalar('train_step/z_reg', latent_reg_loss.item(), global_step)
+                    tb_writer.add_scalar('train_step/kl', kl_loss.item(), global_step)
                     tb_writer.add_scalar('train_step/structured', structured_loss.item(), global_step)
                     tb_writer.add_scalar('train_step/lr', optimizer.param_groups[0]['lr'], global_step)
                     if grad_norm is not None:
                         tb_writer.add_scalar('train_step/grad_norm', float(grad_norm.item()), global_step)
 
-                del recon_x, z, recon_partial, recon_loss, fft_loss, latent_reg_loss, structured_loss, total_loss, x
+                del recon_x, mu, logvar, z, recon_partial, recon_loss, fft_loss, kl_loss, structured_loss, total_loss, x
 
             # Free cached blocks before validation to reduce fragmentation/OOM.
             if torch.cuda.is_available():
