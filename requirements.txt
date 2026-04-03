@@ -6,3 +6,4 @@ matplotlib
 tqdm
 pyyaml
 tensorboard
+scikit-learn
