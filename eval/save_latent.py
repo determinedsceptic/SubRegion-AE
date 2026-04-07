@@ -4,21 +4,23 @@
 对指定 split 的每个样本，编码为 mu（确定性潜变量）并保存为 .pt 文件。
 输出目录结构与原始数据一致：每日一个 {YYYYMMDD}.pt，shape [latent_channels, H', W']。
 
+模型结构参数自动从 checkpoint 中的 args 字段读取，无需手动指定。
+同时保存 metadata.json，包含还原回原空间所需的全部信息。
+
 用法：
     python eval/save_latent.py \
-        --data-name glorys12_kuroshio_extension \
         --ckpt-path output/glorys12_kuroshio_extension/dcae2_.../best_model.pth \
-        --splits train val test \
-        --output-dir output/latent/glorys12_kuroshio_extension/dcae2_...
+        --output-dir output/latent/glorys12_kuroshio_extension/dcae2_... \
+        --splits train val test
 """
 
 import sys
 import os
+import json
 import argparse
 
 import pandas as pd
 import torch
-from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -32,63 +34,106 @@ from config import get_dataset_config
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Save DCAE latent representations offline")
-    parser.add_argument("--data-name", type=str, default="glorys12_kuroshio_extension")
     parser.add_argument("--ckpt-path", type=str, required=True, help="Path to trained model checkpoint")
     parser.add_argument("--output-dir", type=str, required=True, help="Directory to save latent .pt files")
+    parser.add_argument("--data-name", type=str, default=None,
+                        help="Dataset name (default: read from checkpoint)")
     parser.add_argument("--splits", nargs="+", default=["train", "val", "test"],
                         help="Which splits to process (default: train val test)")
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
-
-    # 模型结构参数（需要与训练一致）
-    parser.add_argument("--base-channels", type=int, default=64)
-    parser.add_argument("--channel-multipliers", nargs="+", type=int, default=[1, 2, 4, 8])
-    parser.add_argument("--latent-channels", type=int, default=16)
-    parser.add_argument("--num-res-blocks", type=int, default=2)
-    parser.add_argument("--attention-resolutions", nargs="+", type=int, default=[1, 2])
-    parser.add_argument("--num-heads", type=int, default=8)
-
     return parser.parse_args()
 
 
-def load_model(args, in_channels, device):
+def load_model_from_ckpt(ckpt_path, device):
+    """从 checkpoint 加载模型，自动读取训练时的架构参数。"""
+    ckpt = torch.load(ckpt_path, map_location=device)
+
+    # 训练时保存的完整 args
+    train_args = ckpt.get('args', {})
+    if not train_args:
+        raise ValueError(
+            f"Checkpoint {ckpt_path} 中没有 'args' 字段，"
+            "无法自动推断模型结构。请使用包含 args 的 checkpoint。"
+        )
+
     model = DCAE(
-        in_channels=in_channels,
-        base_channels=args.base_channels,
-        channel_multipliers=args.channel_multipliers,
-        latent_channels=args.latent_channels,
-        num_res_blocks=args.num_res_blocks,
-        attention_resolutions=args.attention_resolutions,
-        num_heads=args.num_heads,
+        in_channels=train_args.get('in_channels', 101),
+        base_channels=train_args['base_channels'],
+        channel_multipliers=train_args['channel_multipliers'],
+        latent_channels=train_args['latent_channels'],
+        num_res_blocks=train_args['num_res_blocks'],
+        attention_resolutions=train_args['attention_resolutions'],
+        num_heads=train_args['num_heads'],
     ).to(device)
 
-    ckpt = torch.load(args.ckpt_path, map_location=device)
     state = ckpt.get('model_state_dict', ckpt.get('model', ckpt))
     state = {(k[7:] if k.startswith('module.') else k): v for k, v in state.items()}
     model.load_state_dict(state, strict=True)
     model.eval()
-    return model
+
+    return model, train_args
+
+
+def save_metadata(output_dir, train_args, ckpt_path, latent_shape, grid_size):
+    """保存 metadata.json，包含还原回原空间所需的全部信息。"""
+    metadata = {
+        'ckpt_path': os.path.abspath(ckpt_path),
+        'latent_shape': list(latent_shape),
+        'grid_size': list(grid_size),
+        'model': {
+            'base_channels': train_args['base_channels'],
+            'channel_multipliers': train_args['channel_multipliers'],
+            'latent_channels': train_args['latent_channels'],
+            'num_res_blocks': train_args['num_res_blocks'],
+            'attention_resolutions': train_args['attention_resolutions'],
+            'num_heads': train_args['num_heads'],
+        },
+        'data': {
+            'data_name': train_args.get('data_name', 'unknown'),
+            'in_channels': train_args.get('in_channels', 101),
+        },
+        'usage': (
+            'To decode: load DCAE with the "model" params above, '
+            'load checkpoint from ckpt_path, then call '
+            'model.decode(z, target_shape=grid_size).'
+        ),
+    }
+
+    path = os.path.join(output_dir, 'metadata.json')
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(metadata, f, ensure_ascii=False, indent=2)
+    print(f"Saved metadata to {path}")
 
 
 def main():
     args = parse_args()
     device = torch.device(args.device)
 
-    dataset_config = get_dataset_config(args.data_name)
+    model, train_args = load_model_from_ckpt(args.ckpt_path, device)
+    data_name = args.data_name or train_args.get('data_name', 'glorys12_kuroshio_extension')
+    print(f"Model loaded from {args.ckpt_path}")
+    print(f"  Architecture: base_channels={train_args['base_channels']}, "
+          f"channel_multipliers={train_args['channel_multipliers']}, "
+          f"latent_channels={train_args['latent_channels']}")
+
+    dataset_config = get_dataset_config(data_name)
     constants = load_constants(dataset_config.constant_dir)
     mu = constants[0][..., None, None].to(device)
     sigma = constants[1][..., None, None].to(device)
 
-    model = load_model(args, dataset_config.num_channels, device)
-    print(f"Model loaded from {args.ckpt_path}")
-
-    # 打印一次潜空间 shape
+    # 获取潜空间 shape
     with torch.inference_mode():
         dummy = torch.randn(1, dataset_config.num_channels, *dataset_config.grid_size, device=device)
         dummy_z = model.encode(normalize_fn(dummy, mu=mu, sigma=sigma))
-        print(f"Latent shape: {tuple(dummy_z.shape[1:])} (per sample)")
+        latent_shape = tuple(dummy_z.shape[1:])
+        print(f"  Latent shape: {latent_shape}")
         del dummy, dummy_z
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    save_metadata(args.output_dir, train_args, args.ckpt_path,
+                  latent_shape, dataset_config.grid_size)
 
     split_ranges = {
         'train': dataset_config.train_date_range,
@@ -108,16 +153,14 @@ def main():
         split_dir = os.path.join(args.output_dir, split)
         os.makedirs(split_dir, exist_ok=True)
 
-        print(f"\n[{split}] {len(dates)} samples → {split_dir}")
+        print(f"\n[{split}] {len(dates)} samples -> {split_dir}")
 
-        # 逐 batch 处理，但按单样本保存
         saved = 0
         with torch.inference_mode():
             for i in tqdm(range(0, len(files), args.batch_size), desc=split):
                 batch_files = files[i:i + args.batch_size]
                 batch_dates = dates[i:i + args.batch_size]
 
-                # 加载 batch
                 tensors = []
                 valid_dates = []
                 for f, d in zip(batch_files, batch_dates):
@@ -132,9 +175,8 @@ def main():
 
                 raw = torch.stack(tensors).to(device=device, dtype=torch.float32)
                 x_norm = normalize_fn(raw, mu=mu, sigma=sigma)
-                z = model.encode(x_norm)  # [B, latent_channels, H', W']
+                z = model.encode(x_norm)
 
-                # 逐样本保存
                 for j, d in enumerate(valid_dates):
                     fname = f"{d.strftime('%Y%m%d')}.pt"
                     torch.save(z[j].cpu(), os.path.join(split_dir, fname))
